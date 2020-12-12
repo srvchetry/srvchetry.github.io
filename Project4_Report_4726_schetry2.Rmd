@@ -1,0 +1,338 @@
+### Project4 Report: Movie Recommendation System  
+##  Saurav Chetry, schetry2@illinois.edu  
+##  FA20, CS598/STAT542 PSL  
+
+
+
+### Objective:  
+
+## To build a recommendation system for movies with two functions, 1. recommendations based on User's favourite genre 2. recommendations based on User's preferences/ratings.  
+
+### Dataset:  
+
+## The dataset MovieLens 1M Dataset contains about 1 million anonymous ratings of approximately 3,900 movies made by 6,040 MovieLens users who joined MovieLens in 2000.  
+
+### System 1: Recommendations based on User's selected Genre.  
+
+```{r include=FALSE}
+#load libraries
+
+set.seed(4726)
+mypackages = c("dplyr", "ggplot2", "recommenderlab","reshape2","Matrix","DT","data.table","tidyr","stringr","knitr","methods","corrplot")   # required packages
+tmp = setdiff(mypackages, rownames(installed.packages()))  # packages need to be installed
+if (length(tmp) > 0) install.packages(tmp)
+lapply(mypackages, require, character.only = TRUE)
+```
+
+```{r warning=FALSE}
+
+#read data hosted online.
+
+myurl = "https://liangfgithub.github.io/MovieData/"
+
+
+
+# read and preprocess ratings data
+
+ratings = read.csv(paste0(myurl, 'ratings.dat?raw=true'), 
+                   sep = ':',
+                   colClasses = c('integer', 'NULL'), 
+                   header = FALSE)
+colnames(ratings) = c('UserID', 'MovieID', 'Rating', 'Timestamp')
+ratings$Timestamp = NULL;
+# colnames(ratings) = c('user', 'movie', 'rating')
+# train.id = sample(nrow(ratings), floor(nrow(ratings)) * 0.8)
+# train = ratings[train.id, ]
+# 
+# test = ratings[-train.id, ]
+# 
+# label = test[c('user', 'rating')]
+# test$rating = NULL
+
+
+# read and preprocess movies data
+
+movies = readLines(paste0(myurl, 'movies.dat?raw=true'))
+movies = strsplit(movies, split = "::", fixed = TRUE, useBytes = TRUE)
+movies = matrix(unlist(movies), ncol = 3, byrow = TRUE)
+movies = data.frame(movies, stringsAsFactors = FALSE)
+colnames(movies) = c('MovieID', 'Title', 'Genres')
+movies$MovieID = as.integer(movies$MovieID)
+
+# convert accented characters
+movies$Title = iconv(movies$Title, "latin1", "UTF-8")
+
+
+# extract year
+movies$Year = as.numeric(unlist(
+  lapply(movies$Title, function(x) substr(x, nchar(x)-4, nchar(x)-1))))
+
+
+# read and preprocess users data
+
+users = read.csv(paste0(myurl, 'users.dat?raw=true'),
+                 sep = ':', header = FALSE)
+users = users[, -c(2,4,6,8)] # skip columns
+colnames(users) = c('UserID', 'Gender', 'Age', 'Occupation', 'Zip-code')
+
+
+```
+
+## Approach1: Approach 1 is based on highly rated movies of a genre. User selects the favourite genre from the UI dropdown and gets the top 10 highly rated movies for that genre.  
+
+```{r message=FALSE, warning=FALSE}
+# highest rated movies by genre
+
+hr.genre = ratings %>%
+  group_by(MovieID) %>%
+  summarize(ratings_per_movie = n(),
+            ave_ratings = round(mean(Rating), dig = 3)) %>%
+  inner_join(movies, by = 'MovieID') %>%
+  filter(grepl("Drama", Genres)) %>%  # Drama Genre only for example
+  top_n(10, ave_ratings) %>% # select top 10 highest average rated movies for the selected genre. ###### Approach 1
+  select('MovieID',
+         'Title',
+         'ave_ratings',
+         'ratings_per_movie',
+         'Genres') %>%
+  arrange(desc(ave_ratings))
+
+hr.genre
+```
+
+## Approach2: Approach 2 is based on highly popular movies of a genre. User selects the favourite genre from the UI dropdown and gets the top 10 highly popular movies for that genre. The movies selected have more than 500 ratings and Users are those who have at least rated 50 movies.  
+
+```{r message=FALSE, warning=FALSE}
+mr.users = ratings %>%       ### users who have rated more than 50 movies
+  group_by(UserID) %>%
+  summarize(number_of_ratings_per_user = n()) %>%
+  filter(number_of_ratings_per_user > 50)
+
+selected.movies = ratings %>%  ###
+  group_by(UserID) %>%
+  inner_join(mr.users, by = 'UserID')
+
+
+hr.genre = selected.movies %>%
+  group_by(MovieID) %>%
+  summarize(ratings_per_movie = n(),
+            ave_ratings = round(mean(Rating), dig = 3)) %>%
+  inner_join(movies, by = 'MovieID') %>%
+  filter(ratings_per_movie > 500) %>%
+  filter(grepl('Drama', Genres)) %>%  # Drama Genre only for example
+  top_n(10, ave_ratings) %>%
+  select('MovieID',
+         'Title',
+         'ave_ratings',
+         'ratings_per_movie',
+         'Genres') %>%
+  arrange(desc(ave_ratings))
+
+hr.genre
+```
+
+
+### System 2: Recommendations based on User's Ratings.  
+
+##  This is a collaborative recommendation system based on 1. User similarity based recommendation and 2. Item similarity based recommendation. R package Recommenderlab R package is used for this system implementation. Recommenderlab methods User Based Collaborative Filtering(UBCF), Item Based Collaborative Filtering(IBCF) as well as Popular are used in the project(for experimentation).  
+
+## User-based CF (Goldberget al.1992;Resnick, Iacovou, Suchak, Bergstrom, and Riedl 1994;Shardanand and Maes 1995) is a memory-based algorithm which tries to mimics word-of-mouth by analyzing rating data from many individuals. The assumption isthat users withsimilar preferences will rate items similarly. Thus missing ratings for a user can be predictedby first finding aneighborhoodof similar users and then aggregate the ratings of these usersto form a prediction. The two main problems of user-based CF are that the whole user database hasto be keptin memory and that expensive similarity computation between the active user and all otherusers in the database has to be performed.
+
+## Item-based CF (Kitts, Freed, and Vrieze 2000;Sarwaret al.2001;Linden, Smith, and York2003;Deshpande and Karypis 2004) is a model-based approach which produces recommenda-tions based on the relationship between items inferred from the rating matrix. The assumptionbehind this approach is that users will prefer items that are similarto other items they like.Item-based CF is more efficient than user-based CF since the model (reduced similarity ma-trix) is relatively small (N×k) and can be fully precomputed. Item-based CF is known to only produce slightly inferior results compared to user-based CF and higher order modelswhich take the joint distribution of sets of items into account are possible (Deshpande andKarypis 2004). Furthermore, item-based CF is successfully applied in large scale recommendersystems (e.g., by Amazon.com).  
+
+## RMSE is used as the performance metric to evaluate prediction/recommendation accuracy over 10 iterations on the training data. Train Test split was choses as 80:20. Among the tuning parameters for UBCF and IBCF, Consine similarity measure, Z-score normalization, nearest neighbour/ K as 25.
+
+## Technical Details & Tuning Parameters:  
+
+### Recommenderlab depends on a RealRatingMatrix for calculations. For UBCF a rating matrix of User X Items is used. For IBFC a rating matrix is Items X Items.
+
+### Cosine Similarity: It is one of the similarity metric measurements which measures similarity between the new user and users in the training data. The idea is to find similar users in the training set, who had similar ratings for movies rated by the new user. For calculating similarity using rating data only the dimensions (items) are used which were rated by both users.
+
+### Normalization: Normalization is used to remove individual rating bias by users who consistently always use lower or higher ratings than other users. Removing such users will affect the training data, so normalization helps. Usually normalization is implemented by centering the rows of the User ratings. I have used Z-score normalization takes rating variance into account
+
+### NN/K : It is the parameter which determines the neighbourhood of items to be considered for prediction calculations. The value of this parameter is usually less than the number of users/items. For UBCF, nn corresponds to number of users who have the highest similarity score.I have used nn as 25. For IBFC, K corresponds to the number of items with the highest similarity score, which is 25 for this simulation.
+
+### Weighted Average: For IBCF, the first step calculates the item vs item silimarity matrix based on the chosen K. As next step, the predictions for unrated items by the new user is calculated by weighted average of other users ratings for those movies.For UBCF the normalizing factor can be seen as the weights used for calculations. In both approaches, I have used the default values from the Recommender methods. 
+
+
+### Missing Values/NAs: NAs can occur when top-N recommendations contain less than N items. This happens when set of unknown items from the user is less than N or if the CF algorithm is not able to identify the N items to recommend. In my implementation, I have encountered NAs when recommending movies based on Popularity in System I. For System 2, I handle NAs by assigning them Zero rating both before and after the predictions. Before the predictions, NAs in rating matrix are assigned 0. Post prediction NAs are assigned 0 as well.
+
+## Project Resources:  
+
+### Weblink for the app: https://saurav-chetry.shinyapps.io/srvchetrygithub/ 
+### Github: 
+
+## Challenges & Conclusion: Implementation of the Recommender methods was not a big challenge as the R package is very powerful with its inbuilt features. Challanges were faced mostly with data handling in the app as the sample code provided need tuning to display the correct predictions. IBCF requires more compute time offline and I used this as the final method for this submission as it requires lesser on-the-fly calculations, thus suitable for the UX of the Web Application.  
+
+## Acknowledgement: STAT542 staff for guidance, Recommenderlab creator and various online resources like https://medium.com/@wwwbbb8510/comparison-of-user-based-and-item-based-collaborative-filtering-f58a1c8a3f1d  
+
+
+```{r warning=FALSE}
+#Method 1, UBCF
+R = acast(train, user ~ movie)
+R = as(R, 'realRatingMatrix')
+rec = Recommender(R, method = 'UBCF',
+                  parameter = list(normalize = 'Z-score', method = 'Cosine', nn = 25)
+)
+recom = predict(rec, R, type = 'ratings') 
+rec_list = as(recom, 'list')
+test$rating = NA
+
+for (u in 1:nrow(test)){
+  
+  # Read userid and movieid from columns 2 and 3 of test data
+  userid = as.character(test$user[u])
+  movieid = as.character(test$movie[u])
+  
+  rating = rec_list[[userid]][movieid]
+  # 2.5 may be too arbitrary
+  test$rating[u] = ifelse(is.na(rating), 2.5, rating)
+}
+rmse = sqrt(mean((test$rating - label$rating)^2))
+rmse
+```
+
+
+```{r warning=FALSE}
+#Method 2, Popularity
+R = acast(train, user ~ movie)
+R = as(R, 'realRatingMatrix')
+rec = Recommender(R, method = 'POPULAR', parameter = list(normalize = 'Z-score'))
+
+recom = predict(rec, R, type = 'ratings') 
+rec_list = as(recom, 'list')
+test$rating = NA
+for (u in 1:nrow(test)){
+  
+  # Read userid and movieid from columns 2 and 3 of test data
+  userid = as.character(test$user[u])
+  movieid = as.character(test$movie[u])
+  
+  rating = rec_list[[userid]][movieid]
+  # 2.5 may be too arbitrary
+  test$rating[u] = ifelse(is.na(rating), 2.5, rating)
+  
+}
+
+#Method 1 error
+rmse = sqrt(mean((test$rating - label$rating)^2))
+rmse
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+set.seed(4726)
+rmse1 = rep(0,10)
+rmse2 = rep(0,10)
+
+for (i in 1:10) {
+  
+
+  df = as.data.frame(ratings)
+  df1 = df[1:50000,]
+  train.id = sample(nrow(df1), floor(nrow(df1)) * 0.8)
+  train = df1[train.id, ]
+  test = df1[-train.id, ]
+  label = test[c('user', 'rating')]
+  test$rating = NULL
+  
+  R = acast(train, user ~ movie)
+  R = as(R, 'realRatingMatrix')
+  
+  rec1 = Recommender(R, method = 'IBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', k = 25))
+  rec2 = Recommender(R, method = 'UBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', nn = 25))
+  
+  recom1 = predict(rec1, R, type = 'ratings') 
+  recom2 = predict(rec2, R, type = 'ratings') 
+  
+  rec_list1 = as(recom1, 'list')
+  rec_list2 = as(recom2, 'list')
+  test$rating = NA
+  
+  for (u in 1:nrow(test)){
+    
+    # Read userid and movieid from columns 2 and 3 of test data
+    userid = as.character(test$user[u])
+    movieid = as.character(test$movie[u])
+    
+    rating1 = rec_list1[[userid]][movieid]
+    rating2 = rec_list2[[userid]][movieid]
+    # 2.5 may be too arbitrary
+    test$rating1[u] = ifelse(is.na(rating1), 2.5, rating1)
+    test$rating2[u] = ifelse(is.na(rating2), 2.5, rating2)
+    
+  }
+  
+  rmse1[i] = sqrt(mean((test$rating1 - label$rating)^2))
+  rmse2[i] = sqrt(mean((test$rating2 - label$rating)^2))
+
+  
+}
+print("RMSE POPULAR: ")
+print(rmse1)
+print("RMSE UBCF: ")
+print(rmse2)
+
+```
+
+```{r}
+boxplot(rmse1,rmse2,names = c("POPULAR","UBCF"),ylab = "RMSE", main = "RMSE from Recommender Methods", sub = "Methods")
+
+```
+```{r message=FALSE, warning=FALSE}
+
+acc_ub = rep(0,10)
+acc_ib = rep(0,10)
+acc_pop = rep(0,10)
+for (i in 1:10) {
+
+ratings = as(ratings, 'realRatingMatrix')
+evlt <- evaluationScheme(ratings, method="split", train=0.8,
+                         given=5)
+evlt
+tr <- getData(evlt, "train")
+tst_known <- getData(evlt, "known")
+tst_unknown <- getData(evlt, "unknown")
+
+
+## create a user-based CF recommender using training data
+rcmnd_ub <- Recommender(tr, "UBCF",
+                        param=list(normalize = 'Z-score',method="cosine",nn= 25))
+
+## create predictions for the test users using known ratings
+pred_ub <- predict(rcmnd_ub, tst_known, type="ratings")
+
+## evaluate recommendations on "unknown" ratings
+acc_ub[i] <- calcPredictionAccuracy(pred_ub, tst_unknown)[[1]]
+
+## repeat with the item-based approach
+rcmnd_ib <- Recommender(tr, "IBCF",
+                        param=list(normalize = 'Z-score',method="cosine",k = 25))
+pred_ib <- predict(rcmnd_ib, tst_known, type="ratings")
+acc_ib[i] <- calcPredictionAccuracy(pred_ib, tst_unknown)[[1]]
+
+## repeat with the item-based approach
+rcmnd_pop <- Recommender(tr, "POPULAR",
+                        param=list(normalize = 'Z-score'))
+pred_pop <- predict(rcmnd_pop, tst_known, type="ratings")
+acc_pop[i] <- calcPredictionAccuracy(pred_pop, tst_unknown)[[1]]
+
+
+
+}
+acc <- cbind(UBCF = acc_ub, IBCF = acc_ib, POPULAR = acc_pop)
+acc
+
+
+```
+
+
+
+
+```{r}
+boxplot(acc, main = "RMSE Comparision", ylab = "RMSE",xlab = "Recommenderlab Methods")
+```
+
+
+
