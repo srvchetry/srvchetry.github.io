@@ -209,8 +209,8 @@ shinyServer(function(input, output, session) {
         
         # run the recommender alogrithm
         
-        # rec = Recommender(real_ratings, method = 'IBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', k= 500))
-        rec = Recommender(real_ratings, method = 'UBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', nn = 500))
+        # rec = Recommender(real_ratings, method = 'IBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', k= 25))
+        rec = Recommender(real_ratings, method = 'UBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', nn = 25))
         # saved.recom = saveRDS(rec,"savedrecomIBCF.RDS")
         # saved.recom = saveRDS(rec,"savedrecomUBCF.RDS")
         # rec = readRDS("savedrecomIBCF.RDS")
