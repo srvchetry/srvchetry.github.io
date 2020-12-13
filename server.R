@@ -97,7 +97,8 @@ movies$image_url = sapply(movies$MovieID,
 
 
 
-# Ratings data from 
+
+# Ratings data 
 
 ratings = read.csv(
   paste0(myurl, 'ratings.dat?raw=true'),
@@ -110,17 +111,24 @@ ratings$Timestamp = NULL
 colnames(ratings) = c('UserID', 'MovieID', 'Rating')
 
 
+# top-movies
 
-## users can give ratings only to those movies which are highly rated.
-
-##  TODO
+top.movies = ratings %>%
+  group_by(MovieID) %>%
+  summarize(ratings_per_movie = n()) %>%
+  inner_join(movies, by = 'MovieID') %>%
+  filter(ratings_per_movie > 1000) %>%
+  select('MovieID',
+         'Title',
+         'Genres',
+         'image_url')
 
 shinyServer(function(input, output, session) {
 
   # show the movies to be rated based on user ratings
   output$ratings <- renderUI({
     num_rows <- 20
-    num_movies <- 6 # movies per row
+    num_movies <- 6 
     
     lapply(1:num_rows, function(i) {
       list(fluidRow(lapply(1:num_movies, function(j) {
@@ -181,52 +189,72 @@ shinyServer(function(input, output, session) {
       # get the user's rating data
       value_list <- reactiveValuesToList(input)
       user_ratings <- get_user_ratings(value_list)
+      # print('user_ratings')
+      # print(user_ratings)
       new_user <- user_ratings$UserID
-
-      ratings <- rbind(user_ratings, ratings)
-      dimension_names <- list(UserID = sort(unique(ratings$UserID)), MovieID = sort(unique(ratings$MovieID)))
-      ratingmat <- spread(select(ratings, MovieID, UserID, Rating), MovieID, Rating) %>% select(-UserID)
-      ratingmat <- as.matrix(ratingmat)
-      dimnames(ratingmat) <- dimension_names
-      ratingmat[is.na(ratingmat)] <- 0 #### NA Handling before predictions
-      sparse_ratings <- as(ratingmat, "sparseMatrix")
-      rm(ratingmat)
-      gc()
-      real_ratings <- new("realRatingMatrix", data = sparse_ratings)
-
-
-      # run the recommender alogrithm
-
-      # rec = Recommender(real_ratings, method = 'IBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', k= 25))
-      # rec = Recommender(real_ratings, method = 'UBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', nn = 25))
-      # saved.recom = saveRDS(rec,"savedrecomIBCF.RDS")
-      # saved.recom = saveRDS(rec,"savedrecomUBCF.RDS")
-      rec = readRDS("savedrecomIBCF.RDS")
-      # rec = readRDS("savedrecomUBCF.RDS")
-      res = predict(rec, real_ratings[new_user,], type = 'ratings')
-
-      rec_list = as(res, 'list')
-      #print(sum(is.na(rec_list[[1]])))
-      rec_list = ifelse(is.na(rec_list[[1]]),0, rec_list[[1]])
       
-      print(rec_list)
-
-      # sort, organize, and return the results
-      user_results <- sort(rec_list, decreasing = TRUE)[1:10]
-      #print(user_results)
-      user_predicted_ids <- as.numeric(names(user_results))
-      p.movies = movies[0,]
-      for (i in 1:10) {
+      if(nrow(user_ratings) !=0){
         
-        p.movies[i,] = rbind(movies[movies$MovieID == user_predicted_ids[i] ,] )
-        p.movies
+        ratings <- rbind(user_ratings, ratings)
+        dimension_names <- list(UserID = sort(unique(ratings$UserID)), MovieID = sort(unique(ratings$MovieID)))
+        ratingmat <- spread(select(ratings, MovieID, UserID, Rating), MovieID, Rating) %>% select(-UserID)
+        ratingmat <- as.matrix(ratingmat)
+        dimnames(ratingmat) <- dimension_names
+        ratingmat[is.na(ratingmat)] <- 0 #### NA Handling before predictions
+        sparse_ratings <- as(ratingmat, "sparseMatrix")
+        rm(ratingmat)
+        gc()
+        real_ratings <- new("realRatingMatrix", data = sparse_ratings)
+        
+        
+        # run the recommender alogrithm
+        
+        # rec = Recommender(real_ratings, method = 'IBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', k= 500))
+        rec = Recommender(real_ratings, method = 'UBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', nn = 500))
+        # saved.recom = saveRDS(rec,"savedrecomIBCF.RDS")
+        # saved.recom = saveRDS(rec,"savedrecomUBCF.RDS")
+        # rec = readRDS("savedrecomIBCF.RDS")
+        # rec = readRDS("savedrecomUBCF.RDS")
+        res = predict(rec, real_ratings[new_user,], type = 'ratings')
+        
+        rec_list = as(res, 'list')
+        # print(sum(is.na(rec_list[[1]])))
+        rec_list = ifelse(is.na(rec_list[[1]]),0, rec_list[[1]])
+        
+        # print('rec_list')
+        # print(rec_list)
+        
+        # sort, organize, and return the results
+        user_results <- sort(rec_list, decreasing = TRUE)[1:10]
+        # print('user_results')
+        # print(user_results)
+        user_predicted_ids <- as.numeric(names(user_results))
+        p.movies = movies[0,]
+        for (i in 1:length(user_predicted_ids)) {
+          
+          p.movies[i,] = rbind(movies[movies$MovieID == user_predicted_ids[i] ,] )
+          p.movies
+        }
+        # print('p.movies')
+        # print(p.movies)
+        recom_result <- data.table(Rank = 1:10, 
+                                   MovieID = p.movies$MovieID,
+                                   Title = p.movies$Title,
+                                   Predicted_rating =  user_results)
+        # print('recom_result with ratings')
+        # print(recom_result)
+        
+      }else if(nrow(user_ratings) == 0){
+        
+        recom_result <- data.table(Rank = 1:10, 
+                                   MovieID = top.movies[1:10,][[1]],
+                                   Title = top.movies[1:10,][[2]])
+        
+        # print('recom_result w/o ratings')
+        # print(recom_result)
       }
-      print(p.movies)
-      recom_result <- data.table(Rank = 1:10, 
-                                  MovieID = p.movies$MovieID,
-                                  Title = p.movies$Title,
-                                  Predicted_rating =  user_results)
-      print(recom_result)
+
+      #print(recom_result)
 
     }) # still busy
     
@@ -237,10 +265,7 @@ shinyServer(function(input, output, session) {
   output$genreresults <- renderUI({
     num_rows <- 2
     num_movies <- 5
-    selGen = input$selectedGenre  ##new
-    print(selGen) ##new
-    #recom_result <- df_genre()
-    recom_result <- get_movie_genre(selGen)  ##new
+    recom_result <- get_movie_genre(input$selectedGenre)  
     
     lapply(1:num_rows, function(i) {
       list(fluidRow(lapply(1:num_movies, function(j) {
