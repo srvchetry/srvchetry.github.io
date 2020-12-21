@@ -135,11 +135,11 @@ shinyServer(function(input, output, session) {
         list(box(
           width = 2,
           div(style = "text-align:center", img(
-            src = movies$image_url[(i - 1) * num_movies + j], height = 150
+            src = top.movies$image_url[(i - 1) * num_movies + j], height = 150
           )),
-          div(style = "text-align:center", strong(movies$Title[(i - 1) * num_movies + j])),
+          div(style = "text-align:center", strong(top.movies$Title[(i - 1) * num_movies + j])),
           div(style = "text-align:center; font-size: 150%; color: #f0ad4e;", ratingInput(
-            paste0("select_", movies$MovieID[(i - 1) * num_movies + j]),
+            paste0("select_", top.movies$MovieID[(i - 1) * num_movies + j]),
             label = "",
             dataStop = 5
           ))
@@ -210,7 +210,7 @@ shinyServer(function(input, output, session) {
         # run the recommender alogrithm
         
         # rec = Recommender(real_ratings, method = 'IBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', k= 25))
-        rec = Recommender(real_ratings, method = 'UBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', nn = 25))
+        rec = Recommender(real_ratings, method = 'UBCF', parameter = list(normalize = 'Z-score', method = 'Cosine', nn = 500))
         # saved.recom = saveRDS(rec,"savedrecomIBCF.RDS")
         # saved.recom = saveRDS(rec,"savedrecomUBCF.RDS")
         # rec = readRDS("savedrecomIBCF.RDS")
@@ -221,28 +221,37 @@ shinyServer(function(input, output, session) {
         # print(sum(is.na(rec_list[[1]])))
         rec_list = ifelse(is.na(rec_list[[1]]),0, rec_list[[1]])
         
-        # print('rec_list')
-        # print(rec_list)
-        
-        # sort, organize, and return the results
-        user_results <- sort(rec_list, decreasing = TRUE)[1:10]
-        # print('user_results')
-        # print(user_results)
-        user_predicted_ids <- as.numeric(names(user_results))
-        p.movies = movies[0,]
-        for (i in 1:length(user_predicted_ids)) {
+        if(length(rec_list) == 0){
           
-          p.movies[i,] = rbind(movies[movies$MovieID == user_predicted_ids[i] ,] )
-          p.movies
+          recom_result <- data.table(Rank = 1:10, 
+                                     MovieID = top.movies[1:10,][[1]],
+                                     Title = top.movies[1:10,][[2]])
+        }else{
+          
+          # print('rec_list')
+          # print(rec_list)
+          
+          # sort, organize, and return the results
+          user_results <- sort(rec_list, decreasing = TRUE)[1:10]
+          # print('user_results')
+          # print(user_results)
+          user_predicted_ids <- as.numeric(names(user_results))
+          p.movies = movies[0,]
+          for (i in 1:length(user_predicted_ids)) {
+            
+            p.movies[i,] = rbind(movies[movies$MovieID == user_predicted_ids[i] ,] )
+            p.movies
+          }
+          # print('p.movies')
+          # print(p.movies)
+          recom_result <- data.table(Rank = 1:10, 
+                                     MovieID = p.movies$MovieID,
+                                     Title = p.movies$Title,
+                                     Predicted_rating =  user_results)
+          # print('recom_result with ratings')
+          # print(recom_result)
+          
         }
-        # print('p.movies')
-        # print(p.movies)
-        recom_result <- data.table(Rank = 1:10, 
-                                   MovieID = p.movies$MovieID,
-                                   Title = p.movies$Title,
-                                   Predicted_rating =  user_results)
-        # print('recom_result with ratings')
-        # print(recom_result)
         
       }else if(nrow(user_ratings) == 0){
         
